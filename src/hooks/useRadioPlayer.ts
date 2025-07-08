@@ -10,9 +10,11 @@ export const useRadioPlayer = () => {
   const retryCountRef = useRef<number>(0);
   const maxRetries = 5; // Maximum number of consecutive retries
   const retryDelayRef = useRef<number | null>(null);
-  const isIntentionalSwitchRef = useRef<boolean>(false);
+  const currentStationIdRef = useRef<string>('');
   const lastShuffleTimeRef = useRef<number>(0);
   const debounceDelayMs = 1000; // Prevent rapid clicking
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const isManualShuffleRef = useRef<boolean>(false);
   
   const [playerState, setPlayerState] = useState<PlayerState>({
     isPlaying: false,
@@ -40,9 +42,7 @@ export const useRadioPlayer = () => {
 
     // Cleanup on unmount
     return () => {
-      clearLoadingTimeout();
-      clearRetryDelay();
-      isIntentionalSwitchRef.current = false;
+      cleanupAudio();
       if (staticGeneratorRef.current) {
         staticGeneratorRef.current.cleanup();
       }
@@ -84,10 +84,63 @@ export const useRadioPlayer = () => {
     retryCountRef.current = 0;
   };
 
-  const handleStationFailure = (message: string) => {
-    // Don't treat intentional switches as failures
-    if (isIntentionalSwitchRef.current) {
-      console.log(`🔄 Ignoring error during intentional switch: ${message}`);
+  const cleanupAudio = () => {
+    console.log('🧹 Cleaning up audio element...');
+    
+    // Cancel any ongoing operations
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    // Clear timeouts
+    clearLoadingTimeout();
+    clearRetryDelay();
+    
+    // Clean up audio element
+    if (audioRef.current) {
+      // Remove ALL event listeners
+      audioRef.current.onloadstart = null;
+      audioRef.current.oncanplay = null;
+      audioRef.current.onplay = null;
+      audioRef.current.onpause = null;
+      audioRef.current.onerror = null;
+      audioRef.current.onended = null;
+      audioRef.current.onloadeddata = null;
+      audioRef.current.onloadedmetadata = null;
+      audioRef.current.onstalled = null;
+      audioRef.current.onsuspend = null;
+      audioRef.current.ontimeupdate = null;
+      audioRef.current.onvolumechange = null;
+      audioRef.current.onwaiting = null;
+      
+      // Stop and reset
+      try {
+        audioRef.current.pause();
+        audioRef.current.src = '';
+        audioRef.current.load();
+      } catch (e) {
+        console.warn('Error during audio cleanup:', e);
+      }
+      
+      audioRef.current = null;
+    }
+  };
+
+  const handleStationFailure = (message: string, stationId: string) => {
+    // Only handle failures for the current station
+    if (stationId !== currentStationIdRef.current) {
+      console.log(`🔄 Ignoring stale error from previous station: ${message} (${stationId} vs ${currentStationIdRef.current})`);
+      return;
+    }
+    
+    // Don't auto-retry if user is manually shuffling
+    if (isManualShuffleRef.current) {
+      console.log(`🤚 Skipping auto-retry during manual shuffle: ${message}`);
+      setPlayerState(prev => ({
+        ...prev,
+        isLoading: false,
+        error: message,
+      }));
       return;
     }
     
@@ -127,14 +180,19 @@ export const useRadioPlayer = () => {
   };
 
   const playStation = async (station: RadioStation) => {
-    console.log(`🎵 Attempting to play station: ${station.name}`);
+    const stationId = `${station.stationuuid}-${Date.now()}`;
+    currentStationIdRef.current = stationId;
     
-    // Mark as intentional switch
-    isIntentionalSwitchRef.current = true;
+    console.log(`🎵 Attempting to play station: ${station.name} (ID: ${stationId})`);
     
-    // Clear any existing timeouts
-    clearLoadingTimeout();
-    clearRetryDelay();
+    // Create new AbortController for this station
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    abortControllerRef.current = new AbortController();
+    
+    // Complete cleanup of old audio
+    cleanupAudio();
 
     // Stop static immediately and wait a bit
     if (staticGeneratorRef.current) {
@@ -144,16 +202,9 @@ export const useRadioPlayer = () => {
       await new Promise(resolve => setTimeout(resolve, 300));
     }
 
-    if (!audioRef.current) {
-      audioRef.current = new Audio();
-      console.log('🔊 Created new audio element');
-    }
-
-    // Completely reset the audio element
-    console.log('🔄 Resetting audio element...');
-    audioRef.current.pause();
-    audioRef.current.currentTime = 0;
-    audioRef.current.src = '';
+    // Create fresh audio element
+    audioRef.current = new Audio();
+    console.log('🔊 Created fresh audio element');
     
     // Wait a moment for cleanup
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -168,9 +219,7 @@ export const useRadioPlayer = () => {
     // Set 10-second timeout for loading
     loadingTimeoutRef.current = setTimeout(() => {
       console.log(`⏰ Station ${station.name} timed out after 10 seconds`);
-      // Reset intentional switch flag before handling timeout
-      isIntentionalSwitchRef.current = false;
-      handleStationFailure(`Station "${station.name}" took too long to load`);
+      handleStationFailure(`Station "${station.name}" took too long to load`, stationId);
     }, 10000);
 
     try {
@@ -180,46 +229,57 @@ export const useRadioPlayer = () => {
       audioRef.current.src = stationUrl;
       audioRef.current.volume = playerState.volume;
 
-      // Clear any existing event listeners to prevent conflicts
-      audioRef.current.onloadstart = null;
-      audioRef.current.oncanplay = null;
-      audioRef.current.onplay = null;
-      audioRef.current.onpause = null;
-      audioRef.current.onerror = null;
-
-      // Setup fresh event listeners
+      // Setup fresh event listeners with station ID validation
       audioRef.current.onloadstart = () => {
+        if (stationId !== currentStationIdRef.current) {
+          console.log(`🚫 Ignoring loadstart for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
+          return;
+        }
         console.log(`📡 Loading started for: ${station.name}`);
         setPlayerState(prev => ({ ...prev, isLoading: true }));
       };
 
       audioRef.current.oncanplay = () => {
+        if (stationId !== currentStationIdRef.current) {
+          console.log(`🚫 Ignoring canplay for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
+          return;
+        }
         console.log(`✅ Can play: ${station.name}`);
         clearLoadingTimeout();
         resetRetryCounter();
-        isIntentionalSwitchRef.current = false; // Reset flag on successful load
+        isManualShuffleRef.current = false; // Reset on successful load
         setPlayerState(prev => ({ ...prev, isLoading: false }));
       };
 
       audioRef.current.onplay = () => {
+        if (stationId !== currentStationIdRef.current) {
+          console.log(`🚫 Ignoring play for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
+          return;
+        }
         console.log(`▶️ Playing: ${station.name}`);
         clearLoadingTimeout();
         resetRetryCounter();
-        isIntentionalSwitchRef.current = false; // Reset flag on successful play
+        isManualShuffleRef.current = false; // Reset on successful play
         setPlayerState(prev => ({ ...prev, isPlaying: true, isLoading: false }));
       };
 
       audioRef.current.onpause = () => {
+        if (stationId !== currentStationIdRef.current) {
+          console.log(`🚫 Ignoring pause for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
+          return;
+        }
         console.log(`⏸️ Paused: ${station.name}`);
         setPlayerState(prev => ({ ...prev, isPlaying: false }));
       };
 
       audioRef.current.onerror = (e) => {
+        if (stationId !== currentStationIdRef.current) {
+          console.log(`🚫 Ignoring error for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
+          return;
+        }
         console.error(`❌ Audio error for ${station.name}:`, e);
         clearLoadingTimeout();
-        // Reset intentional switch flag before handling error
-        isIntentionalSwitchRef.current = false;
-        handleStationFailure(`Failed to load station "${station.name}"`);
+        handleStationFailure(`Failed to load station "${station.name}"`, stationId);
       };
 
       // Load and start playing
@@ -231,11 +291,13 @@ export const useRadioPlayer = () => {
       RadioAPI.incrementClickCount(station.stationuuid);
       
     } catch (error) {
+      if (stationId !== currentStationIdRef.current) {
+        console.log(`🚫 Ignoring play error for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
+        return;
+      }
       console.error(`💥 Play station error for ${station.name}:`, error);
       clearLoadingTimeout();
-      // Reset intentional switch flag before handling error
-      isIntentionalSwitchRef.current = false;
-      handleStationFailure(`Failed to play station "${station.name}"`);
+      handleStationFailure(`Failed to play station "${station.name}"`, stationId);
     }
   };
 
@@ -260,7 +322,7 @@ export const useRadioPlayer = () => {
       await playStation(station);
     } else {
       console.log('❌ No stations available in pool');
-      handleStationFailure('No stations available');
+      handleStationFailure('No stations available', currentStationIdRef.current || 'no-stations');
     }
   };
 
@@ -273,11 +335,19 @@ export const useRadioPlayer = () => {
     }
     lastShuffleTimeRef.current = now;
     
-    // Reset retry counter for manual shuffles
+    console.log('🎲 Manual shuffle requested');
+    
+    // Mark as manual shuffle and reset retry counter
+    isManualShuffleRef.current = true;
     resetRetryCounter();
     clearRetryDelay();
-    isIntentionalSwitchRef.current = false; // Reset flag for new shuffle
+    
     await shuffleStationWithRetry();
+    
+    // Reset manual shuffle flag after attempt
+    setTimeout(() => {
+      isManualShuffleRef.current = false;
+    }, 2000); // Give 2 seconds for the station to load before allowing auto-retries
   };
 
   const togglePlayPause = () => {
@@ -286,12 +356,13 @@ export const useRadioPlayer = () => {
     // Clear timeouts when user manually controls playback
     clearLoadingTimeout();
     clearRetryDelay();
-    isIntentionalSwitchRef.current = false; // Reset flag
 
     if (playerState.isPlaying) {
       audioRef.current.pause();
     } else {
-      audioRef.current.play();
+      audioRef.current.play().catch(error => {
+        console.error('Failed to resume playback:', error);
+      });
     }
   };
 
@@ -335,7 +406,6 @@ export const useRadioPlayer = () => {
     // Also reset retry counter when manually clearing error
     resetRetryCounter();
     clearRetryDelay();
-    isIntentionalSwitchRef.current = false; // Reset flag
     setPlayerState(prev => ({ ...prev, error: null }));
   };
 
