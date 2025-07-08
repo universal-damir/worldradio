@@ -257,7 +257,33 @@ export const useRadioPlayer = () => {
           return;
         }
         clearLoadingTimeout();
-        handleStationFailure(`Failed to load station "${station.name}"`, stationId);
+        
+        // Detect mixed content and other specific errors
+        const error = audioRef.current?.error;
+        const stationUrl = station.url_resolved || station.url;
+        let errorMessage = `Failed to load station "${station.name}"`;
+        
+        if (error) {
+          switch (error.code) {
+            case MediaError.MEDIA_ERR_NETWORK:
+              if (window.location.protocol === 'https:' && stationUrl.startsWith('http://')) {
+                errorMessage = `"${station.name}" uses an insecure connection and cannot be played on this secure site`;
+              } else {
+                errorMessage = `Network error loading "${station.name}"`;
+              }
+              break;
+            case MediaError.MEDIA_ERR_DECODE:
+              errorMessage = `"${station.name}" stream format not supported`;
+              break;
+            case MediaError.MEDIA_ERR_SRC_NOT_SUPPORTED:
+              errorMessage = `"${station.name}" stream source not supported`;
+              break;
+            default:
+              errorMessage = `Error playing "${station.name}"`;
+          }
+        }
+        
+        handleStationFailure(errorMessage, stationId);
       };
 
       // Load and start playing

@@ -1,4 +1,63 @@
-const API_BASE_URL = 'https://de1.api.radio-browser.info/json';
+import { RadioStation } from '../types/radio';
+
+const API_BASE_URL = 'https://nl1.api.radio-browser.info/json';
+
+// Helper function to check if a URL is HTTPS or can be safely loaded
+const isSecureUrl = (url: string): boolean => {
+  if (!url) return false;
+  
+  // Allow HTTPS URLs
+  if (url.startsWith('https://')) return true;
+  
+  // In production (HTTPS), block HTTP URLs to avoid mixed content
+  if (window.location.protocol === 'https:' && url.startsWith('http://')) {
+    return false;
+  }
+  
+  // In development (HTTP), allow HTTP URLs
+  return true;
+};
+
+// Helper function to attempt HTTPS upgrade for HTTP URLs
+const upgradeToHttps = (url: string): string => {
+  if (url.startsWith('http://')) {
+    return url.replace('http://', 'https://');
+  }
+  return url;
+};
+
+// Filter stations to only include those with secure URLs
+const filterSecureStations = (stations: RadioStation[]): RadioStation[] => {
+  const filteredStations = stations
+    .map(station => {
+      // Try to upgrade HTTP to HTTPS
+      if (station.url_resolved?.startsWith('http://')) {
+        station.url_resolved = upgradeToHttps(station.url_resolved);
+      }
+      if (station.url?.startsWith('http://')) {
+        station.url = upgradeToHttps(station.url);
+      }
+      return station;
+    })
+    .filter(station => {
+      const primaryUrl = station.url_resolved || station.url;
+      const isSecure = isSecureUrl(primaryUrl);
+      
+      // Log filtered stations in production to help with debugging
+      if (!isSecure && window.location.protocol === 'https:') {
+        console.warn(`🔒 Filtered out station "${station.name}" due to mixed content (HTTP URL: ${primaryUrl})`);
+      }
+      
+      return isSecure;
+    });
+
+  // Log filtering statistics
+  if (stations.length > filteredStations.length) {
+    console.info(`🔒 Mixed Content Filter: ${stations.length - filteredStations.length} stations filtered out, ${filteredStations.length} secure stations remaining`);
+  }
+
+  return filteredStations;
+};
 
 // List of countries for diverse station selection
 const DIVERSE_COUNTRIES = [
@@ -31,8 +90,10 @@ export class RadioAPI {
   }
 
   static async getRandomStations(count: number = 50): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/search?limit=${count}&order=random&hidebroken=true&has_extended_info=true`;
-    return this.fetchWithErrorHandling(url);
+    const url = `${API_BASE_URL}/stations/search?limit=${count * 2}&order=random&hidebroken=true&has_extended_info=true`;
+    const stations = await this.fetchWithErrorHandling(url);
+    const secureStations = filterSecureStations(stations);
+    return secureStations.slice(0, count);
   }
 
   static async getDiverseStations(count: number = 100): Promise<any[]> {
@@ -42,7 +103,7 @@ export class RadioAPI {
       
       const promises = selectedCountries.map(async (country) => {
         try {
-          const stations = await this.getStationsByCountry(country, stationsPerCountry);
+          const stations = await this.getStationsByCountry(country, stationsPerCountry * 2); // Fetch more to account for filtering
           return stations;
         } catch (error) {
           console.warn(`Failed to fetch stations from ${country}:`, error);
@@ -55,14 +116,17 @@ export class RadioAPI {
         .filter((result) => result.status === 'fulfilled')
         .flatMap((result) => (result as PromiseFulfilledResult<any[]>).value);
 
+      // Apply secure filtering
+      const secureStations = filterSecureStations(allStations);
+
       // If we don't have enough diverse stations, fill with random ones
-      if (allStations.length < count * 0.7) {
-        const randomStations = await this.getRandomStations(count - allStations.length);
-        allStations.push(...randomStations);
+      if (secureStations.length < count * 0.7) {
+        const randomStations = await this.getRandomStations(count - secureStations.length);
+        secureStations.push(...randomStations);
       }
 
       // Shuffle the final list and return requested count
-      return this.shuffleArray(allStations).slice(0, count);
+      return this.shuffleArray(secureStations).slice(0, count);
     } catch (error) {
       console.error('Failed to get diverse stations, falling back to random:', error);
       return this.getRandomStations(count);
@@ -70,23 +134,31 @@ export class RadioAPI {
   }
 
   static async getStationsByCountry(country: string, count: number = 20): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/search?country=${encodeURIComponent(country)}&limit=${count}&order=votes&reverse=true&hidebroken=true`;
-    return this.fetchWithErrorHandling(url);
+    const url = `${API_BASE_URL}/stations/search?country=${encodeURIComponent(country)}&limit=${count * 2}&order=votes&reverse=true&hidebroken=true`;
+    const stations = await this.fetchWithErrorHandling(url);
+    const secureStations = filterSecureStations(stations);
+    return secureStations.slice(0, count);
   }
 
   static async getStationsByGenre(genre: string, count: number = 20): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/search?tag=${encodeURIComponent(genre)}&limit=${count}&order=votes&reverse=true&hidebroken=true`;
-    return this.fetchWithErrorHandling(url);
+    const url = `${API_BASE_URL}/stations/search?tag=${encodeURIComponent(genre)}&limit=${count * 2}&order=votes&reverse=true&hidebroken=true`;
+    const stations = await this.fetchWithErrorHandling(url);
+    const secureStations = filterSecureStations(stations);
+    return secureStations.slice(0, count);
   }
 
   static async getTopStations(count: number = 50): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/topvote/${count}`;
-    return this.fetchWithErrorHandling(url);
+    const url = `${API_BASE_URL}/stations/topvote/${count * 2}`;
+    const stations = await this.fetchWithErrorHandling(url);
+    const secureStations = filterSecureStations(stations);
+    return secureStations.slice(0, count);
   }
 
   static async getStationsByLanguage(language: string, count: number = 20): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/search?language=${encodeURIComponent(language)}&limit=${count}&order=votes&reverse=true&hidebroken=true`;
-    return this.fetchWithErrorHandling(url);
+    const url = `${API_BASE_URL}/stations/search?language=${encodeURIComponent(language)}&limit=${count * 2}&order=votes&reverse=true&hidebroken=true`;
+    const stations = await this.fetchWithErrorHandling(url);
+    const secureStations = filterSecureStations(stations);
+    return secureStations.slice(0, count);
   }
 
   static async getStationsByContinent(continent: string, count: number = 30): Promise<any[]> {
@@ -100,14 +172,16 @@ export class RadioAPI {
 
     const countries = continentCountries[continent] || [];
     const promises = countries.map(country => 
-      this.getStationsByCountry(country, Math.ceil(count / countries.length))
+      this.getStationsByCountry(country, Math.ceil(count * 2 / countries.length)) // Fetch more to account for filtering
     );
 
     const results = await Promise.allSettled(promises);
-    return results
+    const allStations = results
       .filter((result) => result.status === 'fulfilled')
-      .flatMap((result) => (result as PromiseFulfilledResult<any[]>).value)
-      .slice(0, count);
+      .flatMap((result) => (result as PromiseFulfilledResult<any[]>).value);
+    
+    const secureStations = filterSecureStations(allStations);
+    return secureStations.slice(0, count);
   }
 
   static async incrementClickCount(stationuuid: string): Promise<void> {
