@@ -1,6 +1,19 @@
 import { RadioStation } from '../types/radio';
 
-const API_BASE_URL = 'https://nl1.api.radio-browser.info/json';
+// Multiple API endpoints for redundancy
+const API_ENDPOINTS = [
+  'https://de1.api.radio-browser.info/json',
+  'https://nl1.api.radio-browser.info/json',
+  'https://at1.api.radio-browser.info/json'
+];
+
+let currentEndpointIndex = 0;
+
+const getNextApiEndpoint = (): string => {
+  const endpoint = API_ENDPOINTS[currentEndpointIndex];
+  currentEndpointIndex = (currentEndpointIndex + 1) % API_ENDPOINTS.length;
+  return endpoint;
+};
 
 // Helper function to check if a URL is HTTPS or can be safely loaded
 const isSecureUrl = (url: string): boolean => {
@@ -59,106 +72,219 @@ const filterSecureStations = (stations: RadioStation[]): RadioStation[] => {
   return filteredStations;
 };
 
-// List of countries for diverse station selection
+// Reduced country list to avoid overwhelming the API
 const DIVERSE_COUNTRIES = [
   'United States', 'Germany', 'United Kingdom', 'France', 'Italy', 'Spain', 'Netherlands',
-  'Canada', 'Australia', 'Japan', 'South Korea', 'Brazil', 'Mexico', 'Argentina',
-  'India', 'China', 'Russia', 'Poland', 'Sweden', 'Norway', 'Denmark', 'Finland',
-  'Portugal', 'Greece', 'Turkey', 'Egypt', 'South Africa', 'Nigeria', 'Kenya',
-  'Thailand', 'Indonesia', 'Philippines', 'Malaysia', 'Singapore', 'Vietnam',
-  'Chile', 'Peru', 'Colombia', 'Venezuela', 'Uruguay', 'Costa Rica', 'Jamaica',
-  'Ireland', 'Belgium', 'Switzerland', 'Austria', 'Czech Republic', 'Hungary',
-  'Romania', 'Bulgaria', 'Croatia', 'Slovenia', 'Slovakia', 'Estonia', 'Latvia',
-  'Lithuania', 'Israel', 'Lebanon', 'Jordan', 'Morocco', 'Tunisia', 'Ghana',
-  'Cameroon', 'Ethiopia', 'Madagascar', 'Mauritius', 'Botswana', 'Zimbabwe',
-  'New Zealand', 'Fiji', 'Papua New Guinea', 'Iceland', 'Luxembourg', 'Malta',
-  'Cyprus', 'Albania', 'Macedonia', 'Montenegro', 'Serbia', 'Bosnia and Herzegovina'
+  'Canada', 'Australia', 'Japan', 'Brazil', 'Mexico', 'Poland', 'Sweden', 'Norway',
+  'Portugal', 'Greece', 'Turkey', 'South Africa', 'Thailand', 'Singapore',
+  'Ireland', 'Belgium', 'Switzerland', 'Austria', 'Denmark', 'Finland'
 ];
 
 export class RadioAPI {
-  private static async fetchWithErrorHandling(url: string): Promise<any> {
-    try {
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+  private static async fetchWithRetry(url: string, maxRetries: number = 3): Promise<any> {
+    let lastError: Error = new Error('Unknown error');
+    
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+      try {
+        // Add proper headers for CORS and API requirements
+        const response = await fetch(url, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'WorldRadio/1.0'
+          },
+          mode: 'cors',
+          cache: 'default'
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status} - ${response.statusText}`);
+        }
+        
+        const data = await response.json();
+        return data;
+        
+      } catch (error) {
+        lastError = error as Error;
+        console.warn(`🔄 API attempt ${attempt + 1}/${maxRetries} failed for ${url}:`, error);
+        
+        // Don't retry for certain errors
+        if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
+          // CORS or network error - try different endpoint on next call
+          break;
+        }
+        
+        // Wait before retrying (exponential backoff)
+        if (attempt < maxRetries - 1) {
+          await new Promise(resolve => setTimeout(resolve, Math.pow(2, attempt) * 1000));
+        }
       }
-      return await response.json();
+    }
+    
+    throw new Error(`Failed to fetch after ${maxRetries} attempts: ${lastError?.message}`);
+  }
+
+  private static async fetchWithErrorHandling(endpoint: string, path: string): Promise<any> {
+    try {
+      const url = `${endpoint}${path}`;
+      return await this.fetchWithRetry(url, 2); // Reduced retries for faster fallback
     } catch (error) {
-      console.error('API fetch error:', error);
-      throw new Error('Failed to fetch radio stations. Please try again.');
+      console.error('🔴 API fetch error:', error);
+      throw error;
     }
   }
 
   static async getRandomStations(count: number = 50): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/search?limit=${count * 2}&order=random&hidebroken=true&has_extended_info=true`;
-    const stations = await this.fetchWithErrorHandling(url);
-    const secureStations = filterSecureStations(stations);
-    return secureStations.slice(0, count);
+    const path = `/stations/search?limit=${Math.min(count * 2, 100)}&order=random&hidebroken=true&has_extended_info=true`;
+    
+    // Try different endpoints until one works
+    for (const endpoint of API_ENDPOINTS) {
+      try {
+        const stations = await this.fetchWithErrorHandling(endpoint, path);
+        const secureStations = filterSecureStations(stations);
+        console.log(`✅ Successfully fetched ${secureStations.length} random stations from ${endpoint}`);
+        return secureStations.slice(0, count);
+      } catch (error) {
+        console.warn(`⚠️ Endpoint ${endpoint} failed, trying next...`);
+        continue;
+      }
+    }
+    
+    throw new Error('All API endpoints failed. Please check your internet connection.');
   }
 
   static async getDiverseStations(count: number = 100): Promise<any[]> {
     try {
-      const stationsPerCountry = Math.max(1, Math.floor(count / 30)); // Get from ~30 countries
-      const selectedCountries = this.shuffleArray([...DIVERSE_COUNTRIES]).slice(0, 30);
+      // Reduced concurrent requests to avoid overwhelming the API
+      const stationsPerCountry = Math.max(2, Math.floor(count / 15));
+      const selectedCountries = this.shuffleArray([...DIVERSE_COUNTRIES]).slice(0, 15);
       
-      const promises = selectedCountries.map(async (country) => {
-        try {
-          const stations = await this.getStationsByCountry(country, stationsPerCountry * 2); // Fetch more to account for filtering
-          return stations;
-        } catch (error) {
-          console.warn(`Failed to fetch stations from ${country}:`, error);
-          return [];
-        }
-      });
+      console.log(`🌍 Fetching diverse stations from ${selectedCountries.length} countries...`);
+      
+      // Process countries in smaller batches to avoid CORS issues
+      const batchSize = 5;
+      const allStations: any[] = [];
+      
+      for (let i = 0; i < selectedCountries.length; i += batchSize) {
+        const batch = selectedCountries.slice(i, i + batchSize);
+        
+        const promises = batch.map(async (country) => {
+          try {
+            const stations = await this.getStationsByCountry(country, stationsPerCountry);
+            return stations;
+          } catch (error) {
+            console.warn(`❌ Failed to fetch stations from ${country}`);
+            return [];
+          }
+        });
 
-      const results = await Promise.allSettled(promises);
-      const allStations = results
-        .filter((result) => result.status === 'fulfilled')
-        .flatMap((result) => (result as PromiseFulfilledResult<any[]>).value);
+        const batchResults = await Promise.allSettled(promises);
+        const batchStations = batchResults
+          .filter((result) => result.status === 'fulfilled')
+          .flatMap((result) => (result as PromiseFulfilledResult<any[]>).value);
+        
+        allStations.push(...batchStations);
+        
+        // Small delay between batches to be nice to the API
+        if (i + batchSize < selectedCountries.length) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+        }
+      }
 
       // Apply secure filtering
       const secureStations = filterSecureStations(allStations);
+      console.log(`✅ Got ${secureStations.length} diverse stations total`);
 
       // If we don't have enough diverse stations, fill with random ones
-      if (secureStations.length < count * 0.7) {
-        const randomStations = await this.getRandomStations(count - secureStations.length);
-        secureStations.push(...randomStations);
+      if (secureStations.length < count * 0.5) {
+        console.log(`🎲 Adding random stations to reach target count...`);
+        try {
+          const randomStations = await this.getRandomStations(count - secureStations.length);
+          secureStations.push(...randomStations);
+        } catch (error) {
+          console.warn('⚠️ Failed to fetch random stations for backfill');
+        }
       }
 
       // Shuffle the final list and return requested count
       return this.shuffleArray(secureStations).slice(0, count);
     } catch (error) {
-      console.error('Failed to get diverse stations, falling back to random:', error);
+      console.error('🔴 Failed to get diverse stations, falling back to random:', error);
       return this.getRandomStations(count);
     }
   }
 
   static async getStationsByCountry(country: string, count: number = 20): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/search?country=${encodeURIComponent(country)}&limit=${count * 2}&order=votes&reverse=true&hidebroken=true`;
-    const stations = await this.fetchWithErrorHandling(url);
-    const secureStations = filterSecureStations(stations);
-    return secureStations.slice(0, count);
+    const path = `/stations/search?country=${encodeURIComponent(country)}&limit=${Math.min(count * 2, 50)}&order=votes&reverse=true&hidebroken=true`;
+    
+    // Try different endpoints until one works
+    for (const endpoint of API_ENDPOINTS) {
+      try {
+        const stations = await this.fetchWithErrorHandling(endpoint, path);
+        const secureStations = filterSecureStations(stations);
+        return secureStations.slice(0, count);
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    console.warn(`⚠️ All endpoints failed for country: ${country}`);
+    return [];
   }
 
   static async getStationsByGenre(genre: string, count: number = 20): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/search?tag=${encodeURIComponent(genre)}&limit=${count * 2}&order=votes&reverse=true&hidebroken=true`;
-    const stations = await this.fetchWithErrorHandling(url);
-    const secureStations = filterSecureStations(stations);
-    return secureStations.slice(0, count);
+    const path = `/stations/search?tag=${encodeURIComponent(genre)}&limit=${Math.min(count * 2, 50)}&order=votes&reverse=true&hidebroken=true`;
+    
+    // Try different endpoints until one works
+    for (const endpoint of API_ENDPOINTS) {
+      try {
+        const stations = await this.fetchWithErrorHandling(endpoint, path);
+        const secureStations = filterSecureStations(stations);
+        return secureStations.slice(0, count);
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    console.warn(`⚠️ All endpoints failed for genre: ${genre}`);
+    return [];
   }
 
   static async getTopStations(count: number = 50): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/topvote/${count * 2}`;
-    const stations = await this.fetchWithErrorHandling(url);
-    const secureStations = filterSecureStations(stations);
-    return secureStations.slice(0, count);
+    const path = `/stations/topvote/${Math.min(count * 2, 100)}`;
+    
+    // Try different endpoints until one works
+    for (const endpoint of API_ENDPOINTS) {
+      try {
+        const stations = await this.fetchWithErrorHandling(endpoint, path);
+        const secureStations = filterSecureStations(stations);
+        return secureStations.slice(0, count);
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    console.warn(`⚠️ All endpoints failed for top stations`);
+    return [];
   }
 
   static async getStationsByLanguage(language: string, count: number = 20): Promise<any[]> {
-    const url = `${API_BASE_URL}/stations/search?language=${encodeURIComponent(language)}&limit=${count * 2}&order=votes&reverse=true&hidebroken=true`;
-    const stations = await this.fetchWithErrorHandling(url);
-    const secureStations = filterSecureStations(stations);
-    return secureStations.slice(0, count);
+    const path = `/stations/search?language=${encodeURIComponent(language)}&limit=${Math.min(count * 2, 50)}&order=votes&reverse=true&hidebroken=true`;
+    
+    // Try different endpoints until one works
+    for (const endpoint of API_ENDPOINTS) {
+      try {
+        const stations = await this.fetchWithErrorHandling(endpoint, path);
+        const secureStations = filterSecureStations(stations);
+        return secureStations.slice(0, count);
+      } catch (error) {
+        continue;
+      }
+    }
+    
+    console.warn(`⚠️ All endpoints failed for language: ${language}`);
+    return [];
   }
 
   static async getStationsByContinent(continent: string, count: number = 30): Promise<any[]> {
@@ -172,7 +298,7 @@ export class RadioAPI {
 
     const countries = continentCountries[continent] || [];
     const promises = countries.map(country => 
-      this.getStationsByCountry(country, Math.ceil(count * 2 / countries.length)) // Fetch more to account for filtering
+      this.getStationsByCountry(country, Math.ceil(count * 2 / countries.length))
     );
 
     const results = await Promise.allSettled(promises);
@@ -185,11 +311,25 @@ export class RadioAPI {
   }
 
   static async incrementClickCount(stationuuid: string): Promise<void> {
-    try {
-      await fetch(`${API_BASE_URL}/url/${stationuuid}`);
-    } catch (error) {
-      console.error('Failed to increment click count:', error);
+    // Try different endpoints for click tracking
+    for (const endpoint of API_ENDPOINTS) {
+      try {
+        await fetch(`${endpoint}/url/${stationuuid}`, {
+          method: 'GET',
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'WorldRadio/1.0'
+          },
+          mode: 'cors'
+        });
+        return; // Success - exit early
+      } catch (error) {
+        console.warn(`⚠️ Failed to increment click count on ${endpoint}:`, error);
+        continue;
+      }
     }
+    
+    console.error('❌ Failed to increment click count on all endpoints');
   }
 
   // Helper method to shuffle array

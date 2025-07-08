@@ -51,17 +51,48 @@ export const useRadioPlayer = () => {
 
   const loadStationPool = async () => {
     try {
-      // Use diverse stations instead of just random ones
-      const stations = await RadioAPI.getDiverseStations(150);
-      setStationPool(stations);
+      console.log('🎵 Loading station pool...');
+      const stations = await RadioAPI.getDiverseStations(50);
+      
+      if (!stations || stations.length === 0) {
+        console.warn('⚠️ No diverse stations received, trying random stations...');
+        const randomStations = await RadioAPI.getRandomStations(30);
+        
+        if (!randomStations || randomStations.length === 0) {
+          throw new Error('No stations available from any source');
+        }
+        
+        setStationPool(randomStations);
+        console.log(`✅ Loaded ${randomStations.length} random stations as fallback`);
+      } else {
+        setStationPool(stations);
+        console.log(`✅ Loaded ${stations.length} diverse stations`);
+      }
     } catch (error) {
-      console.error('Failed to load station pool:', error);
-      // Fallback to random stations if diverse loading fails
+      console.error('🔴 Failed to load station pool:', error);
+      
+      // Final fallback - try to load any stations at all
       try {
-        const fallbackStations = await RadioAPI.getRandomStations(100);
-        setStationPool(fallbackStations);
-      } catch (fallbackError) {
-        console.error('Failed to load fallback stations:', fallbackError);
+        console.log('🆘 Attempting final fallback...');
+        const fallbackStations = await RadioAPI.getRandomStations(20);
+        
+        if (fallbackStations && fallbackStations.length > 0) {
+          setStationPool(fallbackStations);
+          console.log(`✅ Loaded ${fallbackStations.length} fallback stations`);
+        } else {
+          setPlayerState(prev => ({
+            ...prev,
+            error: 'Unable to connect to radio stations. Please check your internet connection and try again.',
+            isLoading: false
+          }));
+        }
+      } catch (finalError) {
+        console.error('🔴 All fallback attempts failed:', finalError);
+        setPlayerState(prev => ({
+          ...prev,
+          error: 'Unable to connect to radio stations. Please check your internet connection and try again.',
+          isLoading: false
+        }));
       }
     }
   };
@@ -307,17 +338,31 @@ export const useRadioPlayer = () => {
       staticGeneratorRef.current.playStatic(playerState.volume * 0.4);
     }
 
+    // Check if we need to reload the station pool
     if (stationPool.length === 0) {
+      console.log('🔄 Station pool empty, reloading...');
       await loadStationPool();
     }
 
-    if (stationPool.length > 0) {
-      const randomIndex = Math.floor(Math.random() * stationPool.length);
-      const station = stationPool[randomIndex];
-      await playStation(station);
-    } else {
-      handleStationFailure('No stations available', currentStationIdRef.current || 'no-stations');
+    // Double-check we have stations after loading
+    if (stationPool.length === 0) {
+      console.error('🔴 No stations available after loading attempt');
+      handleStationFailure('No radio stations available. Please check your internet connection.', currentStationIdRef.current || 'no-stations');
+      return;
     }
+
+    // Select and play a random station
+    const randomIndex = Math.floor(Math.random() * stationPool.length);
+    const station = stationPool[randomIndex];
+    
+    if (!station) {
+      console.error('🔴 Selected station is invalid');
+      handleStationFailure('Invalid station selected', currentStationIdRef.current || 'invalid-station');
+      return;
+    }
+    
+    console.log(`🎲 Playing station: ${station.name} from ${station.country || 'Unknown'}`);
+    await playStation(station);
   };
 
   const shuffleStation = async () => {
