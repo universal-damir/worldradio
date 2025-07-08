@@ -1,7 +1,7 @@
 export class RadioStaticGenerator {
   private audioElement: HTMLAudioElement | null = null;
   private isPlaying = false;
-  private fadeInterval: NodeJS.Timeout | null = null;
+  private fadeInterval: number | null = null;
 
   async init(): Promise<void> {
     try {
@@ -50,12 +50,26 @@ export class RadioStaticGenerator {
   async stopStatic(): Promise<void> {
     if (!this.audioElement || !this.isPlaying) return;
 
+    console.log('🔇 Stopping static audio...');
+    
     try {
-      // Fade out the static
-      this.fadeOut();
+      // Clear any fade intervals
+      if (this.fadeInterval) {
+        clearInterval(this.fadeInterval);
+        this.fadeInterval = null;
+      }
+      
+      // Immediately stop and reset
+      this.audioElement.pause();
+      this.audioElement.currentTime = 0;
+      this.audioElement.volume = 0;
+      this.isPlaying = false;
+      
+      console.log('✅ Static audio stopped');
       
     } catch (error) {
       console.warn('Failed to stop static:', error);
+      this.isPlaying = false;
     }
   }
 

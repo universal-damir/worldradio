@@ -45,12 +45,12 @@ export const AudioControls: React.FC<AudioControlsProps> = ({
             onClick={onNext}
             disabled={isLoading}
             className="w-12 h-12 bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-400 disabled:cursor-not-allowed rounded-full flex items-center justify-center shadow-lg hover:shadow-xl transition-all duration-200 transform hover:scale-105 relative overflow-hidden"
-            title="Next Station"
+            title={isLoading ? "Switching Station..." : "Next Station"}
           >
             {isLoading && (
               <div className="absolute inset-0 bg-emerald-800 opacity-30 animate-pulse" />
             )}
-            <SkipForward className="w-6 h-6 text-white" />
+            <SkipForward className={`w-6 h-6 text-white ${isLoading ? 'animate-pulse' : ''}`} />
           </button>
         )}
       </div>

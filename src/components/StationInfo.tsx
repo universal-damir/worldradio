@@ -149,6 +149,18 @@ export const StationInfo: React.FC<StationInfoProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Debug info in development */}
+      {import.meta.env.MODE === 'development' && (
+        <div className="mt-4 p-2 bg-gray-100 rounded text-xs text-gray-600">
+          <div><strong>Debug Info:</strong></div>
+          <div>Playing: {isPlaying ? '▶️ Yes' : '⏸️ No'}</div>
+          <div>Loading: {isLoading ? '⏳ Yes' : '✅ No'}</div>
+          <div>Station: {station?.name || 'None'}</div>
+          <div>Volume: {Math.round(volume * 100)}%</div>
+          <div>Has Station: {hasStation ? '✅' : '❌'}</div>
+        </div>
+      )}
     </div>
   );
 };
