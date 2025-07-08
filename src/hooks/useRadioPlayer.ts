@@ -85,8 +85,6 @@ export const useRadioPlayer = () => {
   };
 
   const cleanupAudio = () => {
-    console.log('🧹 Cleaning up audio element...');
-    
     // Cancel any ongoing operations
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -129,13 +127,11 @@ export const useRadioPlayer = () => {
   const handleStationFailure = (message: string, stationId: string) => {
     // Only handle failures for the current station
     if (stationId !== currentStationIdRef.current) {
-      console.log(`🔄 Ignoring stale error from previous station: ${message} (${stationId} vs ${currentStationIdRef.current})`);
       return;
     }
     
     // Don't auto-retry if user is manually shuffling
     if (isManualShuffleRef.current) {
-      console.log(`🤚 Skipping auto-retry during manual shuffle: ${message}`);
       setPlayerState(prev => ({
         ...prev,
         isLoading: false,
@@ -143,8 +139,6 @@ export const useRadioPlayer = () => {
       }));
       return;
     }
-    
-    console.log(`Station failure (attempt ${retryCountRef.current + 1}/${maxRetries}): ${message}`);
     
     // Stop static
     if (staticGeneratorRef.current) {
@@ -183,8 +177,6 @@ export const useRadioPlayer = () => {
     const stationId = `${station.stationuuid}-${Date.now()}`;
     currentStationIdRef.current = stationId;
     
-    console.log(`🎵 Attempting to play station: ${station.name} (ID: ${stationId})`);
-    
     // Create new AbortController for this station
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -196,7 +188,6 @@ export const useRadioPlayer = () => {
 
     // Stop static immediately and wait a bit
     if (staticGeneratorRef.current) {
-      console.log('🔇 Stopping static sound...');
       staticGeneratorRef.current.stopStatic();
       // Wait for static to fully stop
       await new Promise(resolve => setTimeout(resolve, 300));
@@ -204,7 +195,6 @@ export const useRadioPlayer = () => {
 
     // Create fresh audio element
     audioRef.current = new Audio();
-    console.log('🔊 Created fresh audio element');
     
     // Wait a moment for cleanup
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -218,33 +208,27 @@ export const useRadioPlayer = () => {
 
     // Set 10-second timeout for loading
     loadingTimeoutRef.current = setTimeout(() => {
-      console.log(`⏰ Station ${station.name} timed out after 10 seconds`);
       handleStationFailure(`Station "${station.name}" took too long to load`, stationId);
     }, 10000);
 
     try {
       // Set new source and volume
       const stationUrl = station.url_resolved || station.url;
-      console.log(`🔗 Setting station URL: ${stationUrl}`);
       audioRef.current.src = stationUrl;
       audioRef.current.volume = playerState.volume;
 
       // Setup fresh event listeners with station ID validation
       audioRef.current.onloadstart = () => {
         if (stationId !== currentStationIdRef.current) {
-          console.log(`🚫 Ignoring loadstart for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
           return;
         }
-        console.log(`📡 Loading started for: ${station.name}`);
         setPlayerState(prev => ({ ...prev, isLoading: true }));
       };
 
       audioRef.current.oncanplay = () => {
         if (stationId !== currentStationIdRef.current) {
-          console.log(`🚫 Ignoring canplay for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
           return;
         }
-        console.log(`✅ Can play: ${station.name}`);
         clearLoadingTimeout();
         resetRetryCounter();
         isManualShuffleRef.current = false; // Reset on successful load
@@ -253,10 +237,8 @@ export const useRadioPlayer = () => {
 
       audioRef.current.onplay = () => {
         if (stationId !== currentStationIdRef.current) {
-          console.log(`🚫 Ignoring play for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
           return;
         }
-        console.log(`▶️ Playing: ${station.name}`);
         clearLoadingTimeout();
         resetRetryCounter();
         isManualShuffleRef.current = false; // Reset on successful play
@@ -265,63 +247,49 @@ export const useRadioPlayer = () => {
 
       audioRef.current.onpause = () => {
         if (stationId !== currentStationIdRef.current) {
-          console.log(`🚫 Ignoring pause for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
           return;
         }
-        console.log(`⏸️ Paused: ${station.name}`);
         setPlayerState(prev => ({ ...prev, isPlaying: false }));
       };
 
       audioRef.current.onerror = (e) => {
         if (stationId !== currentStationIdRef.current) {
-          console.log(`🚫 Ignoring error for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
           return;
         }
-        console.error(`❌ Audio error for ${station.name}:`, e);
         clearLoadingTimeout();
         handleStationFailure(`Failed to load station "${station.name}"`, stationId);
       };
 
       // Load and start playing
-      console.log(`🚀 Starting playback for: ${station.name}`);
       audioRef.current.load(); // Explicitly load the new source
       await audioRef.current.play();
       
-      console.log(`📊 Incrementing click count for: ${station.name}`);
       RadioAPI.incrementClickCount(station.stationuuid);
       
     } catch (error) {
       if (stationId !== currentStationIdRef.current) {
-        console.log(`🚫 Ignoring play error for old station: ${station.name} (${stationId} vs ${currentStationIdRef.current})`);
         return;
       }
-      console.error(`💥 Play station error for ${station.name}:`, error);
       clearLoadingTimeout();
       handleStationFailure(`Failed to play station "${station.name}"`, stationId);
     }
   };
 
   const shuffleStationWithRetry = async () => {
-    console.log(`🎲 Shuffling station (retry ${retryCountRef.current}/${maxRetries})`);
-    
     // Only play static if we have a current station (not on first load)
     if (playerState.currentStation && staticGeneratorRef.current) {
-      console.log('🔊 Playing tuning static...');
       staticGeneratorRef.current.playStatic(playerState.volume * 0.4);
     }
 
     if (stationPool.length === 0) {
-      console.log('📡 Loading station pool...');
       await loadStationPool();
     }
 
     if (stationPool.length > 0) {
       const randomIndex = Math.floor(Math.random() * stationPool.length);
       const station = stationPool[randomIndex];
-      console.log(`🎯 Selected station: ${station.name} from ${station.country}`);
       await playStation(station);
     } else {
-      console.log('❌ No stations available in pool');
       handleStationFailure('No stations available', currentStationIdRef.current || 'no-stations');
     }
   };
@@ -330,12 +298,9 @@ export const useRadioPlayer = () => {
     // Debounce rapid clicking
     const now = Date.now();
     if (now - lastShuffleTimeRef.current < debounceDelayMs) {
-      console.log(`🚫 Shuffle debounced (${debounceDelayMs}ms cooldown)`);
       return;
     }
     lastShuffleTimeRef.current = now;
-    
-    console.log('🎲 Manual shuffle requested');
     
     // Mark as manual shuffle and reset retry counter
     isManualShuffleRef.current = true;

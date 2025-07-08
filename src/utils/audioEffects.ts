@@ -49,8 +49,6 @@ export class RadioStaticGenerator {
 
   async stopStatic(): Promise<void> {
     if (!this.audioElement || !this.isPlaying) return;
-
-    console.log('🔇 Stopping static audio...');
     
     try {
       // Clear any fade intervals
@@ -64,8 +62,6 @@ export class RadioStaticGenerator {
       this.audioElement.currentTime = 0;
       this.audioElement.volume = 0;
       this.isPlaying = false;
-      
-      console.log('✅ Static audio stopped');
       
     } catch (error) {
       console.warn('Failed to stop static:', error);
