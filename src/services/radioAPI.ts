@@ -54,20 +54,8 @@ const filterSecureStations = (stations: RadioStation[]): RadioStation[] => {
     })
     .filter(station => {
       const primaryUrl = station.url_resolved || station.url;
-      const isSecure = isSecureUrl(primaryUrl);
-      
-      // Log filtered stations in production to help with debugging
-      if (!isSecure && window.location.protocol === 'https:') {
-        console.warn(`🔒 Filtered out station "${station.name}" due to mixed content (HTTP URL: ${primaryUrl})`);
-      }
-      
-      return isSecure;
+      return isSecureUrl(primaryUrl);
     });
-
-  // Log filtering statistics
-  if (stations.length > filteredStations.length) {
-    console.info(`🔒 Mixed Content Filter: ${stations.length - filteredStations.length} stations filtered out, ${filteredStations.length} secure stations remaining`);
-  }
 
   return filteredStations;
 };
@@ -107,7 +95,6 @@ export class RadioAPI {
         
       } catch (error) {
         lastError = error as Error;
-        console.warn(`🔄 API attempt ${attempt + 1}/${maxRetries} failed for ${url}:`, error);
         
         // Don't retry for certain errors
         if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
@@ -130,7 +117,7 @@ export class RadioAPI {
       const url = `${endpoint}${path}`;
       return await this.fetchWithRetry(url, 2); // Reduced retries for faster fallback
     } catch (error) {
-      console.error('🔴 API fetch error:', error);
+      console.error('API fetch error:', error);
       throw error;
     }
   }
@@ -143,10 +130,8 @@ export class RadioAPI {
       try {
         const stations = await this.fetchWithErrorHandling(endpoint, path);
         const secureStations = filterSecureStations(stations);
-        console.log(`✅ Successfully fetched ${secureStations.length} random stations from ${endpoint}`);
         return secureStations.slice(0, count);
       } catch (error) {
-        console.warn(`⚠️ Endpoint ${endpoint} failed, trying next...`);
         continue;
       }
     }
@@ -160,8 +145,6 @@ export class RadioAPI {
       const stationsPerCountry = Math.max(2, Math.floor(count / 15));
       const selectedCountries = this.shuffleArray([...DIVERSE_COUNTRIES]).slice(0, 15);
       
-      console.log(`🌍 Fetching diverse stations from ${selectedCountries.length} countries...`);
-      
       // Process countries in smaller batches to avoid CORS issues
       const batchSize = 5;
       const allStations: any[] = [];
@@ -174,7 +157,6 @@ export class RadioAPI {
             const stations = await this.getStationsByCountry(country, stationsPerCountry);
             return stations;
           } catch (error) {
-            console.warn(`❌ Failed to fetch stations from ${country}`);
             return [];
           }
         });
@@ -194,23 +176,21 @@ export class RadioAPI {
 
       // Apply secure filtering
       const secureStations = filterSecureStations(allStations);
-      console.log(`✅ Got ${secureStations.length} diverse stations total`);
 
       // If we don't have enough diverse stations, fill with random ones
       if (secureStations.length < count * 0.5) {
-        console.log(`🎲 Adding random stations to reach target count...`);
         try {
           const randomStations = await this.getRandomStations(count - secureStations.length);
           secureStations.push(...randomStations);
         } catch (error) {
-          console.warn('⚠️ Failed to fetch random stations for backfill');
+          // Silently continue with what we have
         }
       }
 
       // Shuffle the final list and return requested count
       return this.shuffleArray(secureStations).slice(0, count);
     } catch (error) {
-      console.error('🔴 Failed to get diverse stations, falling back to random:', error);
+      console.error('Failed to get diverse stations, falling back to random:', error);
       return this.getRandomStations(count);
     }
   }
@@ -229,7 +209,6 @@ export class RadioAPI {
       }
     }
     
-    console.warn(`⚠️ All endpoints failed for country: ${country}`);
     return [];
   }
 
@@ -247,7 +226,6 @@ export class RadioAPI {
       }
     }
     
-    console.warn(`⚠️ All endpoints failed for genre: ${genre}`);
     return [];
   }
 
@@ -265,7 +243,6 @@ export class RadioAPI {
       }
     }
     
-    console.warn(`⚠️ All endpoints failed for top stations`);
     return [];
   }
 
@@ -283,7 +260,6 @@ export class RadioAPI {
       }
     }
     
-    console.warn(`⚠️ All endpoints failed for language: ${language}`);
     return [];
   }
 
@@ -324,12 +300,9 @@ export class RadioAPI {
         });
         return; // Success - exit early
       } catch (error) {
-        console.warn(`⚠️ Failed to increment click count on ${endpoint}:`, error);
         continue;
       }
     }
-    
-    console.error('❌ Failed to increment click count on all endpoints');
   }
 
   // Helper method to shuffle array

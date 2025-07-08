@@ -51,11 +51,9 @@ export const useRadioPlayer = () => {
 
   const loadStationPool = async () => {
     try {
-      console.log('🎵 Loading station pool...');
       const stations = await RadioAPI.getDiverseStations(50);
       
       if (!stations || stations.length === 0) {
-        console.warn('⚠️ No diverse stations received, trying random stations...');
         const randomStations = await RadioAPI.getRandomStations(30);
         
         if (!randomStations || randomStations.length === 0) {
@@ -63,22 +61,18 @@ export const useRadioPlayer = () => {
         }
         
         setStationPool(randomStations);
-        console.log(`✅ Loaded ${randomStations.length} random stations as fallback`);
       } else {
         setStationPool(stations);
-        console.log(`✅ Loaded ${stations.length} diverse stations`);
       }
     } catch (error) {
-      console.error('🔴 Failed to load station pool:', error);
+      console.error('Failed to load station pool:', error);
       
       // Final fallback - try to load any stations at all
       try {
-        console.log('🆘 Attempting final fallback...');
         const fallbackStations = await RadioAPI.getRandomStations(20);
         
         if (fallbackStations && fallbackStations.length > 0) {
           setStationPool(fallbackStations);
-          console.log(`✅ Loaded ${fallbackStations.length} fallback stations`);
         } else {
           setPlayerState(prev => ({
             ...prev,
@@ -87,7 +81,7 @@ export const useRadioPlayer = () => {
           }));
         }
       } catch (finalError) {
-        console.error('🔴 All fallback attempts failed:', finalError);
+        console.error('All fallback attempts failed:', finalError);
         setPlayerState(prev => ({
           ...prev,
           error: 'Unable to connect to radio stations. Please check your internet connection and try again.',
@@ -340,13 +334,11 @@ export const useRadioPlayer = () => {
 
     // Check if we need to reload the station pool
     if (stationPool.length === 0) {
-      console.log('🔄 Station pool empty, reloading...');
       await loadStationPool();
     }
 
     // Double-check we have stations after loading
     if (stationPool.length === 0) {
-      console.error('🔴 No stations available after loading attempt');
       handleStationFailure('No radio stations available. Please check your internet connection.', currentStationIdRef.current || 'no-stations');
       return;
     }
@@ -356,12 +348,10 @@ export const useRadioPlayer = () => {
     const station = stationPool[randomIndex];
     
     if (!station) {
-      console.error('🔴 Selected station is invalid');
       handleStationFailure('Invalid station selected', currentStationIdRef.current || 'invalid-station');
       return;
     }
     
-    console.log(`🎲 Playing station: ${station.name} from ${station.country || 'Unknown'}`);
     await playStation(station);
   };
 
