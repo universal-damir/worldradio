@@ -7,6 +7,10 @@ export const useRadioPlayer = () => {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const staticGeneratorRef = useRef<RadioStaticGenerator | null>(null);
   const loadingTimeoutRef = useRef<number | null>(null);
+  const retryCountRef = useRef<number>(0);
+  const maxRetries = 5; // Maximum number of consecutive retries
+  const retryDelayRef = useRef<number | null>(null);
+  
   const [playerState, setPlayerState] = useState<PlayerState>({
     isPlaying: false,
     isLoading: false,
@@ -34,6 +38,7 @@ export const useRadioPlayer = () => {
     // Cleanup on unmount
     return () => {
       clearLoadingTimeout();
+      clearRetryDelay();
       if (staticGeneratorRef.current) {
         staticGeneratorRef.current.cleanup();
       }
@@ -64,9 +69,57 @@ export const useRadioPlayer = () => {
     }
   };
 
+  const clearRetryDelay = () => {
+    if (retryDelayRef.current) {
+      clearTimeout(retryDelayRef.current);
+      retryDelayRef.current = null;
+    }
+  };
+
+  const resetRetryCounter = () => {
+    retryCountRef.current = 0;
+  };
+
+  const handleStationFailure = (message: string) => {
+    console.log(`Station failure (attempt ${retryCountRef.current + 1}/${maxRetries}): ${message}`);
+    
+    // Stop static
+    if (staticGeneratorRef.current) {
+      staticGeneratorRef.current.stopStatic();
+    }
+
+    retryCountRef.current += 1;
+
+    if (retryCountRef.current >= maxRetries) {
+      // Too many retries, stop and show error
+      setPlayerState(prev => ({
+        ...prev,
+        isLoading: false,
+        isPlaying: false,
+        error: 'Unable to find working stations. Please check your internet connection and try again.',
+      }));
+      retryCountRef.current = 0;
+      return;
+    }
+
+    // Set temporary error message
+    setPlayerState(prev => ({
+      ...prev,
+      isLoading: false,
+      error: `${message} (${retryCountRef.current}/${maxRetries})`,
+    }));
+
+    // Retry with increasing delay
+    const delay = retryCountRef.current * 2000; // 2s, 4s, 6s, 8s, 10s
+    retryDelayRef.current = setTimeout(() => {
+      shuffleStationWithRetry();
+    }, delay);
+  };
+
   const playStation = async (station: RadioStation) => {
-    // Clear any existing timeout
+    // Clear any existing timeouts
     clearLoadingTimeout();
+    clearRetryDelay();
 
     // Play static sound while switching
     if (staticGeneratorRef.current) {
@@ -84,27 +137,10 @@ export const useRadioPlayer = () => {
       currentStation: station,
     }));
 
-    // Set 6-second timeout for loading
+    // Set 8-second timeout for loading (increased from 6)
     loadingTimeoutRef.current = setTimeout(() => {
-      console.log(`Station ${station.name} failed to load within 6 seconds, skipping...`);
-      
-      // Stop static
-      if (staticGeneratorRef.current) {
-        staticGeneratorRef.current.stopStatic();
-      }
-      
-      // Set error message
-      setPlayerState(prev => ({
-        ...prev,
-        isLoading: false,
-        error: 'Station took too long to load. Trying another one...',
-      }));
-      
-      // Auto-skip to next station
-      setTimeout(() => {
-        shuffleStation();
-      }, 1000);
-    }, 6000);
+      handleStationFailure(`Station "${station.name}" took too long to load`);
+    }, 8000);
 
     try {
       // Stop current playback
@@ -122,6 +158,7 @@ export const useRadioPlayer = () => {
 
       audioRef.current.oncanplay = () => {
         clearLoadingTimeout();
+        resetRetryCounter(); // Reset on successful load
         setPlayerState(prev => ({ ...prev, isLoading: false }));
         // Stop static when station is ready to play
         if (staticGeneratorRef.current) {
@@ -131,6 +168,7 @@ export const useRadioPlayer = () => {
 
       audioRef.current.onplay = () => {
         clearLoadingTimeout();
+        resetRetryCounter(); // Reset on successful play
         setPlayerState(prev => ({ ...prev, isPlaying: true, isLoading: false }));
         // Ensure static is stopped when playing
         if (staticGeneratorRef.current) {
@@ -142,20 +180,10 @@ export const useRadioPlayer = () => {
         setPlayerState(prev => ({ ...prev, isPlaying: false }));
       };
 
-      audioRef.current.onerror = () => {
+      audioRef.current.onerror = (e) => {
         clearLoadingTimeout();
-        // Stop static on error
-        if (staticGeneratorRef.current) {
-          staticGeneratorRef.current.stopStatic();
-        }
-        setPlayerState(prev => ({
-          ...prev,
-          isPlaying: false,
-          isLoading: false,
-          error: 'Failed to load station. Trying another one...',
-        }));
-        // Auto-skip on error
-        setTimeout(() => shuffleStation(), 1500);
+        console.error('Audio error:', e);
+        handleStationFailure(`Failed to load station "${station.name}"`);
       };
 
       // Start playing
@@ -166,16 +194,12 @@ export const useRadioPlayer = () => {
       
     } catch (error) {
       clearLoadingTimeout();
-      setPlayerState(prev => ({
-        ...prev,
-        isPlaying: false,
-        isLoading: false,
-        error: 'Failed to play station. Please try another one.',
-      }));
+      console.error('Play station error:', error);
+      handleStationFailure(`Failed to play station "${station.name}"`);
     }
   };
 
-  const shuffleStation = async () => {
+  const shuffleStationWithRetry = async () => {
     // Play tuning static sound
     if (staticGeneratorRef.current && playerState.currentStation) {
       staticGeneratorRef.current.playStatic(playerState.volume * 0.4);
@@ -189,14 +213,24 @@ export const useRadioPlayer = () => {
       const randomIndex = Math.floor(Math.random() * stationPool.length);
       const station = stationPool[randomIndex];
       await playStation(station);
+    } else {
+      handleStationFailure('No stations available');
     }
+  };
+
+  const shuffleStation = async () => {
+    // Reset retry counter for manual shuffles
+    resetRetryCounter();
+    clearRetryDelay();
+    await shuffleStationWithRetry();
   };
 
   const togglePlayPause = () => {
     if (!audioRef.current || !playerState.currentStation) return;
 
-    // Clear timeout when user manually controls playback
+    // Clear timeouts when user manually controls playback
     clearLoadingTimeout();
+    clearRetryDelay();
 
     if (playerState.isPlaying) {
       audioRef.current.pause();
@@ -242,6 +276,9 @@ export const useRadioPlayer = () => {
   };
 
   const clearError = () => {
+    // Also reset retry counter when manually clearing error
+    resetRetryCounter();
+    clearRetryDelay();
     setPlayerState(prev => ({ ...prev, error: null }));
   };
 

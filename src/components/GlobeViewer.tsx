@@ -103,41 +103,52 @@ export const GlobeViewer: React.FC<GlobeViewerProps> = ({
         style={{ 
           width: `${size}px`, 
           height: `${size}px`,
-          margin: '0 auto'
+          margin: '0 auto',
+          pointerEvents: 'none',
+          touchAction: 'none',
+          userSelect: 'none'
         }}
+        className="pointer-events-none touch-none select-none"
       >
-        <Globe
-          ref={globeRef}
-          width={size}
-          height={size}
-          globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
-          backgroundColor="rgba(0,0,0,0)"
-          
-          // Countries layer
-          polygonsData={countries}
-          polygonCapColor={getCountryColor}
-          polygonSideColor={getCountryColor}
-          polygonStrokeColor={getCountryStroke}
-          polygonAltitude={0.01}
-          
-          // Points layer for location markers
-          pointsData={locationPoints}
-          pointColor={(point: any) => point.color}
-          pointAltitude={0.02}
-          pointRadius={0.8}
-          pointResolution={12}
-          
-          // Animation settings
-          enablePointerInteraction={false}
-          animateIn={false}
-        />
+        <div 
+          style={{ 
+            pointerEvents: 'none',
+            touchAction: 'none',
+            userSelect: 'none',
+            overflow: 'hidden'
+          }}
+          className="pointer-events-none touch-none select-none"
+        >
+          <Globe
+            ref={globeRef}
+            width={size}
+            height={size}
+            globeImageUrl="//unpkg.com/three-globe/example/img/earth-blue-marble.jpg"
+            backgroundColor="rgba(0,0,0,0)"
+            
+            // Countries layer
+            polygonsData={countries}
+            polygonCapColor={getCountryColor}
+            polygonSideColor={getCountryColor}
+            polygonStrokeColor={getCountryStroke}
+            polygonAltitude={0.01}
+            
+            // Points layer for location markers
+            pointsData={locationPoints}
+            pointColor={(point: any) => point.color}
+            pointAltitude={0.02}
+            pointRadius={0.8}
+            pointResolution={12}
+            
+            // Animation settings - completely disable all interactions
+            enablePointerInteraction={false}
+            animateIn={false}
+          />
+        </div>
       </div>
       
       {selectedCountry && (
-        <div className="text-center mt-4">
-          <p className="text-sm font-medium text-gray-700">
-            📍 {selectedCountry}
-          </p>
+        <div className="text-center mt-4 pointer-events-none">
           {isRotating && (
             <p className="text-xs text-blue-500 animate-pulse mt-1">
               Locating country...

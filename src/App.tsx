@@ -74,26 +74,26 @@ function App() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-purple-50 overflow-x-hidden">
       {/* Header */}
-      <header className="flex items-center justify-between p-6">
+      <header className="flex items-center justify-between p-4 md:p-6 bg-white/80 backdrop-blur-sm sticky top-0 z-10 border-b border-gray-100">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
-            <Radio className="w-6 h-6 text-white" />
+          <div className="w-8 h-8 md:w-10 md:h-10 bg-gradient-to-br from-blue-600 to-purple-600 rounded-full flex items-center justify-center">
+            <Radio className="w-4 h-4 md:w-6 md:h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-gray-800">WorldRadio</h1>
-            <p className="text-sm text-gray-600">Shuffle</p>
+            <h1 className="text-lg md:text-xl font-bold text-gray-800">WorldRadio</h1>
+            <p className="text-xs md:text-sm text-gray-600">Shuffle</p>
           </div>
         </div>
         
         <button
           onClick={() => setShowFavorites(true)}
-          className="relative p-3 bg-white rounded-full shadow-lg hover:shadow-xl transition-shadow"
+          className="relative p-2 md:p-3 bg-white rounded-full shadow-md md:shadow-lg hover:shadow-xl transition-shadow"
         >
-          <Heart className="w-6 h-6 text-red-500" />
+          <Heart className="w-5 h-5 md:w-6 md:h-6 text-red-500" />
           {favorites.length > 0 && (
-            <span className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
+            <span className="absolute -top-1 -right-1 md:-top-2 md:-right-2 w-5 h-5 md:w-6 md:h-6 bg-red-500 text-white text-xs rounded-full flex items-center justify-center font-bold">
               {favorites.length}
             </span>
           )}
@@ -101,10 +101,10 @@ function App() {
       </header>
 
       {/* Main Content */}
-      <main className="container mx-auto px-6 py-8">
-        <div className="max-w-2xl mx-auto">
+      <main className="container mx-auto px-4 md:px-6 py-4 md:py-8 max-w-4xl">
+        <div className="w-full">
           {/* Station Info with integrated controls */}
-          <div className="bg-white rounded-3xl shadow-2xl p-8 mb-8">
+          <div className="bg-white/90 backdrop-blur-sm rounded-2xl md:rounded-3xl shadow-lg md:shadow-2xl p-4 md:p-8 mb-6 md:mb-8">
             <StationInfo
               station={playerState.currentStation}
               isFavorite={playerState.currentStation ? isFavorite(playerState.currentStation.stationuuid) : false}
@@ -121,14 +121,14 @@ function App() {
 
           {/* Instructions - only show when no station */}
           {!playerState.currentStation && !playerState.isLoading && (
-            <div className="text-center mt-12">
-              <p className="text-gray-500 text-lg mb-4">
+            <div className="text-center mt-8 md:mt-12 px-4">
+              <p className="text-gray-500 text-base md:text-lg mb-4">
                 🌍 Discover radio stations from around the world
               </p>
-              <p className="text-gray-400 mb-2">
+              <p className="text-gray-400 mb-2 text-sm md:text-base">
                 Press play to explore diverse stations from 70+ countries
               </p>
-              <p className="text-gray-400 text-sm">
+              <p className="text-gray-400 text-xs md:text-sm">
                 Experience music, news, and culture from every continent
               </p>
             </div>
@@ -137,8 +137,8 @@ function App() {
       </main>
 
       {/* Footer */}
-      <footer className="text-center py-8 text-gray-500">
-        <p className="text-sm">
+      <footer className="text-center py-6 md:py-8 text-gray-500 px-4">
+        <p className="text-xs md:text-sm">
           Powered by{' '}
           <a 
             href="https://radio-browser.info" 
@@ -156,6 +156,7 @@ function App() {
         <ErrorMessage
           error={playerState.error}
           onClose={clearError}
+          onRetry={shuffleStation}
         />
       )}
 
